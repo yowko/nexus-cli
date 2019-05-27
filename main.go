@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"html/template"
 	"os"
-	
+
 	"github.com/blang/semver"
 	"github.com/mlabouardy/nexus-cli/registry"
 	"github.com/urfave/cli"
@@ -22,11 +22,11 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "Nexus CLI"
 	app.Usage = "Manage Docker Private Registry on Nexus"
-	app.Version = "1.0.0-beta"
+	app.Version = "1.0.0"
 	app.Authors = []cli.Author{
 		cli.Author{
-			Name:  "Mohamed Labouardy",
-			Email: "mohamed@labouardy.com",
+			Name:  "Yowko",
+			Email: "yowko@yowko.com",
 		},
 	}
 	app.Commands = []cli.Command{
@@ -95,6 +95,10 @@ func main() {
 						},
 						cli.StringFlag{
 							Name: "sort, s",
+						},
+						cli.StringSliceFlag{
+							Name: "exclude, e",
+							Usage: "Exclude specific tags",
 						},
 					},
 					Action: func(c *cli.Context) error {
@@ -169,9 +173,11 @@ func listImages(c *cli.Context) error {
 func listTagsByImage(c *cli.Context) error {
 	var imgName = c.String("name")
 	var sort = c.String("sort")
+	var excludes = c.StringSlice("exclude")
 	if sort != "nosemver" {
 		sort = "semver"
 	}
+	excludes= append(excludes,"latest")
 
 	r, err := registry.NewRegistry()
 	if err != nil {
@@ -182,7 +188,7 @@ func listTagsByImage(c *cli.Context) error {
 	}
 	tags, err := r.ListTagsByImage(imgName)
 
-	compareStringNumber := getSortComparisonStrategy(sort)
+	compareStringNumber := getSortComparisonStrategy(sort,excludes)
 	Compare(compareStringNumber).Sort(tags)
 
 	if err != nil {
@@ -218,14 +224,35 @@ func showImageInfo(c *cli.Context) error {
 	return nil
 }
 
+func contains(stringSlice []string, searchString string) bool {
+	for _, value := range stringSlice {
+		if value == searchString {
+			return true
+		}
+	}
+	return false
+}
+
 func deleteImage(c *cli.Context) error {
 	var imgName = c.String("name")
 	var tag = c.String("tag")
 	var keep = c.Int("keep")
+	var excludes = c.StringSlice("exclude")
 	var sort = c.String("sort")
 	if sort != "nosemver" {
 		sort = "semver"
 	}
+
+	excludes= append(excludes,"latest")
+
+
+	for i, val := range excludes {
+		fmt.Printf("%d\t%s\n", i, val)
+	}
+
+	/*if exclude != ""{
+		fmt.Printf("exclude input:"+exclude)
+	}*/
 
 	if imgName == "" {
 		fmt.Fprintf(c.App.Writer, "You should specify the image name\n")
@@ -242,14 +269,14 @@ func deleteImage(c *cli.Context) error {
 			} else {
 				tags, err := r.ListTagsByImage(imgName)
 
-				compareStringNumber := getSortComparisonStrategy(sort)
+				compareStringNumber := getSortComparisonStrategy(sort,excludes)
 				Compare(compareStringNumber).Sort(tags)
 
 				if err != nil {
 					return cli.NewExitError(err.Error(), 1)
 				}
-				if len(tags) >= keep {
-					for _, tag := range tags[:len(tags)-keep] {
+				if len(tags) >= keep+len(excludes) {
+					for _, tag := range tags[:len(tags)-keep-len(excludes)] {
 						fmt.Printf("%s:%s image will be deleted ...\n", imgName, tag)
 						r.DeleteImageByTag(imgName, tag)
 					}
@@ -267,7 +294,7 @@ func deleteImage(c *cli.Context) error {
 	return nil
 }
 
-func getSortComparisonStrategy(sort string) func(str1, str2 string) bool{
+func getSortComparisonStrategy(sort string,excludes []string) func(str1, str2 string) bool{
 	var compareStringNumber func(str1, str2 string) bool
 
 	if sort == "nosemver" {
@@ -278,10 +305,13 @@ func getSortComparisonStrategy(sort string) func(str1, str2 string) bool{
 
 	if sort == "semver" {
 		compareStringNumber = func(str1, str2 string) bool {
-			if str1 == "latest" {
+			fmt.Printf("str1: %q\n;str2: %q\n;!contains(excludes,str1): %q\n;contains(excludes,str2): %q\n", str1,str2,!contains(excludes,str1),contains(excludes,str2))
+
+			if contains(excludes,str1){
 				return false
 			}
-			if str2 == "latest" {
+
+			if  contains(excludes,str2) {
 				return true
 			}
 			version1, err1 := semver.Make(str1)
