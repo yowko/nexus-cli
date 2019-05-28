@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
-	"html/template"
-	"os"
-
 	"github.com/blang/semver"
 	"github.com/mlabouardy/nexus-cli/registry"
 	"github.com/urfave/cli"
+	"html/template"
+	"os"
+	"path/filepath"
 )
 
 const (
@@ -137,12 +137,21 @@ func setNexusCredentials(c *cli.Context) error {
 		repository,
 	}
 
-	tmpl, err := template.New(".credentials").Parse(CREDENTIALS_TEMPLATES)
+	ex, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	exPath := filepath.Dir(ex)
+
+	filePath, _ := filepath.Abs(exPath + "/.credentials")
+	fmt.Println(filePath)
+
+	tmpl, err := template.New(filePath).Parse(CREDENTIALS_TEMPLATES)
 	if err != nil {
 		return cli.NewExitError(err.Error(), 1)
 	}
 
-	f, err := os.Create(".credentials")
+	f, err := os.Create(filePath)
 	if err != nil {
 		return cli.NewExitError(err.Error(), 1)
 	}
