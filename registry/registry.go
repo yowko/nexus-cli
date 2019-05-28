@@ -50,6 +50,7 @@ func NewRegistry() (Registry, error) {
 	exPath := filepath.Dir(ex)
 
 	filePath, _ := filepath.Abs(exPath + "/.credentials")
+	fmt.Printf(filePath)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return r, errors.New(fmt.Sprintf("%s file not found\n", filePath))
 	} else if err != nil {
