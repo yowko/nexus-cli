@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/blang/semver"
-	"github.com/mlabouardy/nexus-cli/registry"
+	"github.com/yowko/nexus-cli/registry"
 	"github.com/urfave/cli"
 	"html/template"
 	"os"
