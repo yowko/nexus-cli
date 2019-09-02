@@ -50,7 +50,7 @@ func NewRegistry() (Registry, error) {
 	exPath := filepath.Dir(ex)
 
 	filePath, _ := filepath.Abs(exPath + "/.credentials")
-	//fmt.Printf(filePath)
+	//fmt.Println(filePath)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return r, errors.New(fmt.Sprintf("%s file not found\n", filePath))
 	} else if err != nil {
@@ -94,6 +94,7 @@ func (r Registry) ListTagsByImage(image string) ([]string, error) {
 	client := &http.Client{}
 
 	url := fmt.Sprintf("%s/repository/%s/v2/%s/tags/list", r.Host, r.Repository, image)
+	//fmt.Printf("%d\n", url)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
