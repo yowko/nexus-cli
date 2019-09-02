@@ -24,7 +24,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "Nexus CLI"
 	app.Usage = "Manage Docker Private Registry on Nexus"
-	app.Version = "1.0.0"
+	app.Version = "1.1.0"
 	app.Authors = []cli.Author{
 		{
 			Name:  "Yowko",
@@ -269,10 +269,12 @@ func executeDelete(keep int, imgName string, excludeShas []string, targetTags []
 			if err != nil {
 				return cli.NewExitError(err.Error(), 1)
 			}
+
 			if !contains(excludeShas, tmpSha) {
 				r.DeleteImageByTag(imgName, tag)
+			} else {
+				fmt.Printf("exclude %s when tag is %s\n", tmpSha, tag)
 			}
-
 		}
 	}
 
@@ -358,7 +360,7 @@ func deleteImage(c *cli.Context) error {
 				}
 			}
 			for _, v := range keepList {
-				excludeShas, err = deleteTargetTags( imgName, v.tags, v.keepCount, sort, excludeShas)
+				excludeShas, err = deleteTargetTags(imgName, v.tags, v.keepCount, sort, excludeShas)
 			}
 
 		} else {
@@ -391,16 +393,24 @@ func deleteTargetTags(imgName string, targetTags []string, keepCount int, sort s
 			compareStringNumber := getSortComparisonStrategy(imgName, sort, excludeShas) //excludes)
 			Compare(compareStringNumber).Sort(targetTags)
 		}
-		for _, tmpTag := range targetTags[len(targetTags)-keepCount+1:] {
-			tmpsha, err := r.GetImageSHA(imgName, tmpTag)
-			if err != nil {
-				return excludeShas, cli.NewExitError(err.Error(), 1)
+		startIndex := len(targetTags) - keepCount + 1
+		if startIndex < 0 || startIndex > len(targetTags) {
+			startIndex = 0
+		}
+		//fmt.Println(startIndex)
+		//fmt.Println(len(targetTags))
+		if keepCount > 0 {
+			for _, tmpTag := range targetTags[startIndex:] {
+				tmpsha, err := r.GetImageSHA(imgName, tmpTag)
+				if err != nil {
+					return excludeShas, cli.NewExitError(err.Error(), 1)
+				}
+				//fmt.Printf("index:%d, imageName:%s,tag:%s \n", i, imgName, tmpTag)
+				excludeShas = append(excludeShas, tmpsha)
 			}
-			//fmt.Printf("index:%d, imageName:%s,tag:%s \n", i, imgName, tmpTag)
-			excludeShas = append(excludeShas, tmpsha)
 		}
 
-		err = executeDelete( keepCount, imgName, excludeShas, targetTags)
+		err = executeDelete(keepCount, imgName, excludeShas, targetTags)
 		if err != nil {
 			return excludeShas, cli.NewExitError(err.Error(), 1)
 		}
