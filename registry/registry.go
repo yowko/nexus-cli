@@ -146,7 +146,7 @@ func (r Registry) ImageManifest(image string, tag string) (ImageManifest, error)
 }
 
 func (r Registry) DeleteImageByTag(image string, tag string) error {
-	sha, err := r.getImageSHA(image, tag)
+	sha, err := r.GetImageSHA(image, tag)
 	if err != nil {
 		return err
 	}
