@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"github.com/blang/semver"
-	"github.com/yowko/nexus-cli/registry"
 	"github.com/urfave/cli"
+	"github.com/yowko/nexus-cli/registry"
 	"html/template"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -24,7 +26,7 @@ func main() {
 	app.Usage = "Manage Docker Private Registry on Nexus"
 	app.Version = "1.0.0"
 	app.Authors = []cli.Author{
-		cli.Author{
+		{
 			Name:  "Yowko",
 			Email: "yowko@yowko.com",
 		},
@@ -57,7 +59,7 @@ func main() {
 							Usage: "List tags by image name",
 						},
 						cli.StringFlag{
-							Name: "sort, s",
+							Name:  "sort, s",
 							Usage: "Sort tags by semantic version default, assuming all tags are semver except latest.",
 						},
 					},
@@ -96,8 +98,8 @@ func main() {
 						cli.StringFlag{
 							Name: "sort, s",
 						},
-						cli.StringSliceFlag{
-							Name: "exclude, e",
+						cli.StringFlag{
+							Name:  "exclude, e",
 							Usage: "Exclude specific tags",
 						},
 					},
@@ -182,11 +184,12 @@ func listImages(c *cli.Context) error {
 func listTagsByImage(c *cli.Context) error {
 	var imgName = c.String("name")
 	var sort = c.String("sort")
-	var excludes = c.StringSlice("exclude")
+	var excludes = strings.Split(c.String("exclude"), ",")
+	var excludeShas []string
 	if sort != "nosemver" {
 		sort = "semver"
 	}
-	excludes= append(excludes,"latest")
+	excludes = append(excludes, "latest")
 
 	r, err := registry.NewRegistry()
 	if err != nil {
@@ -197,7 +200,17 @@ func listTagsByImage(c *cli.Context) error {
 	}
 	tags, err := r.ListTagsByImage(imgName)
 
-	compareStringNumber := getSortComparisonStrategy(sort,excludes)
+	for i, val := range excludes {
+		fmt.Printf("%d\t%s\n", i, val)
+		excludesha, err := r.GetImageSHA(imgName, val)
+		if err != nil {
+			return cli.NewExitError(err.Error(), 1)
+		}
+		fmt.Println(excludesha)
+		excludeShas = append(excludeShas, excludesha)
+	}
+
+	compareStringNumber := getSortComparisonStrategy(imgName, sort, excludeShas)
 	Compare(compareStringNumber).Sort(tags)
 
 	if err != nil {
@@ -242,57 +255,112 @@ func contains(stringSlice []string, searchString string) bool {
 	return false
 }
 
+func executeDelete(keep int, imgName string, excludeShas []string, targetTags []string) error {
+	r, err := registry.NewRegistry()
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
+
+	for i, tag := range targetTags {
+		if i < len(targetTags)-keep {
+
+			fmt.Printf("%s:%s image will be deleted ...\n", imgName, tag)
+			tmpSha, err := r.GetImageSHA(imgName, tag)
+			if err != nil {
+				return cli.NewExitError(err.Error(), 1)
+			}
+			if !contains(excludeShas, tmpSha) {
+				r.DeleteImageByTag(imgName, tag)
+			}
+
+		}
+	}
+
+	return nil
+}
 func deleteImage(c *cli.Context) error {
 	var imgName = c.String("name")
 	var tag = c.String("tag")
-	var keep = c.Int("keep")
-	var excludes = c.StringSlice("exclude")
+	var keeps = strings.Split(c.String("keep"), ",")
+	var excludes = strings.Split(c.String("exclude"), ",")
 	var sort = c.String("sort")
+	var excludeShas []string
 	if sort != "nosemver" {
 		sort = "semver"
 	}
 
-	excludes= append(excludes,"latest")
+	excludes = append(excludes, "latest")
 
-
-	for i, val := range excludes {
-		fmt.Printf("%d\t%s\n", i, val)
+	r, err := registry.NewRegistry()
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
 	}
+	var keepList = make(map[string]*keepObject)
+	// prod 預設全部保留
+	keepList["prod"] = &keepObject{keepCount: 999}
 
-	/*if exclude != ""{
-		fmt.Printf("exclude input:"+exclude)
-	}*/
+	for _, val := range keeps {
+		//fmt.Printf("%d\t%s\n", i, val)
+		var tmpTag string
+		tmpKeep := 999
+		if strings.Contains(val, ":") {
+			tmpVal := strings.Split(val, ":")
+			tmpTag = tmpVal[0]
+			tmpKeep, err = strconv.Atoi(tmpVal[1])
+		} else {
+			tmpTag = val
+		}
+		keepList[tmpTag] = &keepObject{keepCount: tmpKeep}
+	}
+	//建立未指定要 keep 的 container
+	keepList["others"] = &keepObject{keepCount: 0}
 
+	for _, val := range excludes {
+		//fmt.Printf("%d\t%s\n", i, val)
+
+		excludesha, err := r.GetImageSHA(imgName, val)
+		if err != nil {
+			return cli.NewExitError(err.Error(), 1)
+		}
+		//fmt.Println(excludesha)
+		excludeShas = append(excludeShas, excludesha)
+	}
 	if imgName == "" {
 		fmt.Fprintf(c.App.Writer, "You should specify the image name\n")
 		cli.ShowSubcommandHelp(c)
 	} else {
-		r, err := registry.NewRegistry()
-		if err != nil {
-			return cli.NewExitError(err.Error(), 1)
-		}
 		if tag == "" {
-			if keep == 0 {
-				fmt.Fprintf(c.App.Writer, "You should either specify the tag or how many images you want to keep\n")
-				cli.ShowSubcommandHelp(c)
-			} else {
-				tags, err := r.ListTagsByImage(imgName)
 
-				compareStringNumber := getSortComparisonStrategy(sort,excludes)
-				Compare(compareStringNumber).Sort(tags)
+			tags, err := r.ListTagsByImage(imgName)
+			if err != nil {
+				return cli.NewExitError(err.Error(), 1)
+			}
 
-				if err != nil {
-					return cli.NewExitError(err.Error(), 1)
-				}
-				if len(tags) >= keep+len(excludes) {
-					for _, tag := range tags[:len(tags)-keep-len(excludes)] {
-						fmt.Printf("%s:%s image will be deleted ...\n", imgName, tag)
-						r.DeleteImageByTag(imgName, tag)
+			for _, tag := range tags {
+				//fmt.Printf("%d\t%s\n", i, tag)
+				//符合要 exclude 的就不處理
+				if !contains(excludes, tag) {
+
+					var tmpPrefix string
+					if strings.Contains(tag, "-") {
+						tmpVal := strings.Split(tag, "-")
+						tmpPrefix = tmpVal[0]
+					} else {
+						tmpPrefix = tag
+
 					}
-				} else {
-					fmt.Printf("Only %d images are available\n", len(tags))
+					if val, ok := keepList[tmpPrefix]; ok {
+						val.tags = append(val.tags, tag)
+					} else {
+						keepList["others"].tags = append(keepList["others"].tags, tag)
+					}
+
 				}
 			}
+			for _, v := range keepList {
+				excludeShas, err = deleteTargetTags( imgName, v.tags, v.keepCount, sort, excludeShas)
+			}
+
 		} else {
 			err = r.DeleteImageByTag(imgName, tag)
 			if err != nil {
@@ -303,7 +371,44 @@ func deleteImage(c *cli.Context) error {
 	return nil
 }
 
-func getSortComparisonStrategy(sort string,excludes []string) func(str1, str2 string) bool{
+type keepObject struct {
+	keepCount int
+	tags      []string
+}
+
+func deleteTargetTags(imgName string, targetTags []string, keepCount int, sort string, excludeShas []string) ([]string, error) {
+
+	if len(targetTags) > 0 && keepCount < 999 {
+		if len(targetTags) < keepCount {
+			keepCount = len(targetTags)
+		}
+		r, err := registry.NewRegistry()
+		if err != nil {
+			return excludeShas, cli.NewExitError(err.Error(), 1)
+		}
+		if keepCount != 0 {
+
+			compareStringNumber := getSortComparisonStrategy(imgName, sort, excludeShas) //excludes)
+			Compare(compareStringNumber).Sort(targetTags)
+		}
+		for _, tmpTag := range targetTags[len(targetTags)-keepCount+1:] {
+			tmpsha, err := r.GetImageSHA(imgName, tmpTag)
+			if err != nil {
+				return excludeShas, cli.NewExitError(err.Error(), 1)
+			}
+			//fmt.Printf("index:%d, imageName:%s,tag:%s \n", i, imgName, tmpTag)
+			excludeShas = append(excludeShas, tmpsha)
+		}
+
+		err = executeDelete( keepCount, imgName, excludeShas, targetTags)
+		if err != nil {
+			return excludeShas, cli.NewExitError(err.Error(), 1)
+		}
+	}
+	return excludeShas, nil
+}
+
+func getSortComparisonStrategy(imgName string, sort string, excludeShas []string) func(str1, str2 string) bool {
 	var compareStringNumber func(str1, str2 string) bool
 
 	if sort == "nosemver" {
@@ -314,23 +419,60 @@ func getSortComparisonStrategy(sort string,excludes []string) func(str1, str2 st
 
 	if sort == "semver" {
 		compareStringNumber = func(str1, str2 string) bool {
-			fmt.Printf("str1: %q\n;str2: %q\n;!contains(excludes,str1): %q\n;contains(excludes,str2): %q\n", str1,str2,!contains(excludes,str1),contains(excludes,str2))
+			//fmt.Printf("str1: %q\n;str2: %q\n;!contains(excludes,str1): %q\n;contains(excludes,str2): %q\n", str1,str2,!contains(excludes,str1),contains(excludes,str2))
 
-			if contains(excludes,str1){
+			r, err := registry.NewRegistry()
+			if err != nil {
+				fmt.Printf("Error init NewRegistry: %q\n", err)
+			}
+
+			shastr1, err := r.GetImageSHA(imgName, str1)
+			if err != nil {
+				fmt.Printf("Error get %s:%s sha: %q\n", imgName, str1, err)
+			}
+
+			if contains(excludeShas, shastr1) {
 				return false
 			}
 
-			if  contains(excludes,str2) {
+			shastr2, err := r.GetImageSHA(imgName, str2)
+			if err != nil {
+				fmt.Printf("Error get %s:%s sha: %q\n", imgName, str2, err)
+			}
+
+			if contains(excludeShas, shastr2) {
 				return true
 			}
-			version1, err1 := semver.Make(str1)
+
+			var semverStr1 string
+			if strings.ContainsAny(str1, "-") {
+				tmpSemverStr := strings.Split(str1, "-")
+				semverStr1 = tmpSemverStr[1]
+			} else {
+				semverStr1 = str1
+			}
+			//fmt.Printf("get semver from string with prefix %s:%s ; \n",str1,semverStr1)
+
+			version1, err1 := semver.Make(semverStr1)
 			if err1 != nil {
-			    fmt.Printf("Error parsing version1: %q\n", err1)
+				fmt.Printf("Error parsing version1: %s ; %q\n", semverStr1, err1)
 			}
-			version2, err2 := semver.Make(str2)
+
+			var semverStr2 string
+			if strings.ContainsAny(str2, "-") {
+				tmpSemverStr := strings.Split(str2, "-")
+				semverStr2 = tmpSemverStr[1]
+			} else {
+				semverStr2 = str2
+			}
+			//fmt.Printf("get semver from string with prefix %s:%s ;\n",str2,semverStr2)
+
+			version2, err2 := semver.Make(semverStr2)
 			if err2 != nil {
-			    fmt.Printf("Error parsing version2: %q\n", err2)
+				fmt.Printf("Error parsing version2: %s ;  %q\n", semverStr2, err2)
 			}
+
+			//fmt.Printf("get semver from string with prefix str1:%s ; str2:%s\nÍ",semverStr1,semverStr2)
 			return version1.LT(version2)
 		}
 	}
