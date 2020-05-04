@@ -247,9 +247,11 @@ func showImageInfo(c *cli.Context) error {
 }
 
 func contains(stringSlice []string, searchString string) bool {
-	for _, value := range stringSlice {
-		if value == searchString {
-			return true
+	if len(stringSlice) > 0 {
+		for _, value := range stringSlice {
+			if value == searchString {
+				return true
+			}
 		}
 	}
 	return false
@@ -388,10 +390,13 @@ func deleteTargetTags(imgName string, targetTags []string, keepCount int, sort s
 		if err != nil {
 			return excludeShas, cli.NewExitError(err.Error(), 1)
 		}
-		if keepCount != 0 {
+		if keepCount >= 0 {
 
 			compareStringNumber := getSortComparisonStrategy(imgName, sort, excludeShas) //excludes)
-			Compare(compareStringNumber).Sort(targetTags)
+
+			if compareStringNumber != nil {
+				Compare(compareStringNumber).Sort(targetTags)
+			}
 		}
 		startIndex := len(targetTags) - keepCount + 1
 		if startIndex < 0 || startIndex > len(targetTags) {
